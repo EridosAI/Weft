@@ -13,10 +13,10 @@ This is the living cross-session handoff. Every session ends by updating this do
 
 ## Current Status
 
-**Current stage:** Session 4 complete. Memory bank and online training loop implemented and tested (22/22 tests pass, 5.2s total). Proceeding to Session 5 (env wrapper + pre-flight smoke test).
+**Current stage:** Session 5a complete (env wrapper + Stage 0a config + pre-flight smoke-test script + env tests, all 10 tests pass; fast suite 42/42). About to run Session 5b: the pre-flight smoke test. Stopping at the pre-flight outcome as directed by the batch plan.
 **Last session date:** 2026-04-24
 **Current tier lock:** Tier A only (strictly enforced per pam_tier_a_grok_instructions.md §2 and CODING_STANDARDS.md §1.4).
-**Next immediate action:** Session 5 per SESSION_BATCH_INSTRUCTIONS.md — implement `src/env/push_t_staged.py` (PushTStagedEnv wrapping gym-pusht at 96→224 with random action policy at effective 10 Hz), `configs/stage_0a.yaml`, `scripts/preflight_smoke_test.py`, and `tests/test_push_t_staged.py`. Run the pre-flight smoke test at the end. **Stop at the pre-flight result.**
+**Next immediate action:** Run `scripts/preflight_smoke_test.py` (1000 frames, Stage 0a config, full pipeline on CUDA) and write `results/preflight/{smoke_report.json, SMOKE_REPORT.md}`. On PASS: stop and report to the human; do not launch Stage 0a. On FAIL: also write `FAILURE_REPORT.md`, stop and report.
 
 ---
 
@@ -96,7 +96,8 @@ Update at the end of each session. Do not skip — this is how the progression t
 | Session 3 — trajectory predictor | complete | 10/10 tests pass, 13.67M params | src/predictor/trajectory_predictor.py, tests/test_trajectory_predictor.py | 9080f6c |
 | Session 4 — memory bank | complete | 11/11 tests pass | src/memory/memory_bank.py, tests/test_memory_bank.py | a1b5de3 |
 | Session 4 — online training loop | complete | 11/11 tests pass | src/training/online_loop.py, tests/test_online_loop.py | 1e9997e |
-| Session 5 — env wrapper + pre-flight | not started | — | — | — |
+| Session 5a — env wrapper + Stage 0a config + pre-flight script | complete | 10/10 env tests pass | src/env/push_t_staged.py, configs/stage_0a.yaml, scripts/preflight_smoke_test.py, tests/test_push_t_staged.py | 7b120cd |
+| Session 5b — pre-flight smoke test execution | not started | — | — | — |
 | Session 4 — memory bank + training loop | not started | — | — | — |
 | Session 5 — env wrapper + pre-flight smoke test | not started | — | — | — |
 | Stage 0a — single config | not started | — | — | — |
@@ -436,6 +437,7 @@ Most recent session first. Append new sessions at the top of this section.
 - Session 3 — trajectory predictor: `9080f6c`.
 - Session 4 — memory bank: `a1b5de3`.
 - Session 4 — online training loop: `1e9997e`.
+- Session 5a — env wrapper + pre-flight script: `7b120cd`.
 - End of Stage 0a commit: __________________
 - End of Stage 0b commit: __________________
 - End of Stage 0c commit: __________________
