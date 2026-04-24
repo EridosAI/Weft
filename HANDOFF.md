@@ -13,10 +13,10 @@ This is the living cross-session handoff. Every session ends by updating this do
 
 ## Current Status
 
-**Current stage:** Ready for Session 2. Weft repo extraction (Session 0) complete and committed (`1e23b35`). GitHub remote `https://github.com/EridosAI/Weft.git` configured (not pushed; push deferred to explicit instruction). Ready for Execution Order step 2 (frozen V-JEPA 2 encoder impl + smoke test), per SESSION_BATCH_INSTRUCTIONS.md Session 2.
+**Current stage:** Session 2 complete. Frozen V-JEPA 2 wrapper implemented and tested (10/10 tests pass). Environment pins bumped to match the WSL stack that actually supports V-JEPA 2 (transformers 5.3.0). Remote `https://github.com/EridosAI/Weft` up-to-date through push earlier in this batch. Proceeding to Session 3 (trajectory predictor).
 **Last session date:** 2026-04-24
 **Current tier lock:** Tier A only (strictly enforced per pam_tier_a_grok_instructions.md §2 and CODING_STANDARDS.md §1.4).
-**Next immediate action:** Session 2 per SESSION_BATCH_INSTRUCTIONS.md — implement `src/encoders/frozen_vjepa2.py` wrapping `facebook/vjepa2-vitl-fpc64-256`, with tests under `tests/test_frozen_vjepa2.py`. Do not begin until explicit instruction to proceed.
+**Next immediate action:** Session 3 per SESSION_BATCH_INSTRUCTIONS.md — implement `src/predictor/trajectory_predictor.py` (transformer encoder, 4 layers, 8 heads, hidden 512, MLP 2048, W=16, learnable position + mask tokens) with tests at `tests/test_trajectory_predictor.py`.
 
 ---
 
@@ -91,7 +91,8 @@ Update at the end of each session. Do not skip — this is how the progression t
 |---|---|---|---|---|
 | Bootstrap (Eridos parent) | complete | n/a | original paths in Eridos repo | e91fcad, 625cbd3, edbb662 (audit) |
 | Weft extraction (Session 0) | complete | n/a | this repo | 1e23b35 (initial) |
-| Session 2 — frozen V-JEPA 2 wrapper | not started | — | — | — |
+| Environment pin alignment | complete | n/a | requirements.txt, .env_snapshot.txt, HANDOFF env section | c59b9cf |
+| Session 2 — frozen V-JEPA 2 wrapper | complete | 10/10 tests pass | src/encoders/frozen_vjepa2.py, tests/test_frozen_vjepa2.py | 70d69cf |
 | Session 3 — trajectory predictor | not started | — | — | — |
 | Session 4 — memory bank + training loop | not started | — | — | — |
 | Session 5 — env wrapper + pre-flight smoke test | not started | — | — | — |
@@ -179,6 +180,43 @@ The instructions §4 treat numerical gate thresholds as calibration targets. Rec
 ## Session Log
 
 Most recent session first. Append new sessions at the top of this section.
+
+### Session 2 — 2026-04-24 — Frozen V-JEPA 2 wrapper
+
+**Goal:** Implement `src/encoders/frozen_vjepa2.py` wrapping V-JEPA 2 ViT-L from `facebook/vjepa2-vitl-fpc64-256` with a `(B, D)` per-frame embedding API, T=1 pixel_values_videos contract, freeze verification, and unit tests. Batch plan: `SESSION_BATCH_INSTRUCTIONS.md` §Session 2.
+
+**Attempted:**
+- Environment alignment first: investigated why the Session 1 `transformers==4.41.2` pin would block V-JEPA 2 loading (V-JEPA 2 entered `transformers` in 5.x). Bumped `requirements.txt` to the actual working WSL stack and regenerated `.env_snapshot.txt`. Committed as `c59b9cf`.
+- Introspected `transformers.VJEPA2Model` directly: forward takes `pixel_values_videos` of shape `(B, T, C, H, W)` and returns `last_hidden_state` of shape `(B, N_patches, D)`. Confirmed there is no CLS token in V-JEPA 2.
+- Reported the CLS-token spec contradiction as a §4 stop condition. Human confirmed the spec was in error and approved mean-pool over patch tokens as the correct extraction.
+- Implemented `FrozenVJepa2Encoder` with: freeze verification at init, `encode_frame` accepting `(C, H, W)` and `(B, C, H, W)`, the required verbatim T=1 comment block at the unsqueeze site, mean-pool on `last_hidden_state`, shape/dtype validation at module boundaries, and forward aliased to `encode_frame`.
+- Wrote ten tests covering forward output shape, no-trainable-parameters freeze, determinism on identical input, single-vs-batched equivalence, wrong channel count, wrong spatial size, wrong dimensionality, non-tensor rejection, `embed_dim == 1024`, and `requires_grad == False` on outputs.
+
+**Worked:**
+- All 10 tests pass in 7.83 s on the WSL stack (torch 2.10.0+cu128, transformers 5.3.0, V-JEPA 2 checkpoint already cached under `~/.cache/huggingface/hub/models--facebook--vjepa2-vitl-fpc64-256`).
+- Freeze confirmed: `sum(p.numel() for p in model.parameters() if p.requires_grad) == 0`.
+- Embedding dim confirmed at runtime: `model.config.hidden_size == 1024` → matches the spec's D=1024 assertion.
+- The verbatim T=1 comment block from SESSION_BATCH_INSTRUCTIONS.md §Session 2 is in place at [src/encoders/frozen_vjepa2.py](src/encoders/frozen_vjepa2.py).
+
+**Failed / in progress:**
+- None. No long-running jobs; test run was 7.83 s.
+
+**Decisions made:**
+- **Spec correction — CLS token → mean-pool.** V-JEPA 2 is a JEPA-family ViT without a CLS token. The spec's "extract CLS token from final layer" instruction was corrected to mean-pool of `last_hidden_state` over the patch dimension. Human confirmed the spec was wrong, not the model. Module docstring records the reasoning; `pam_tier_a_grok_instructions.md` §3.1 will be corrected in a separate final commit (`fix(spec): ...`) at the end of this batch.
+- **No preprocessing inside the encoder.** The wrapper accepts already-normalised float tensors rather than pixel arrays; the env wrapper (Session 5) will do any ImageNet-style normalisation before passing to `encode_frame`. This keeps the encoder's contract narrow and testable with synthetic `torch.randn` inputs.
+- **`forward = encode_frame` alias.** Makes `FrozenVJepa2Encoder` usable as a plain `nn.Module` while keeping the dominant API name `encode_frame` that reflects the single-frame intent.
+- **Tolerances in batched-vs-single equivalence test:** `atol=1e-4, rtol=1e-4`. V-JEPA 2 forward is mathematically identical for B=1 vs stacked-batch inputs, but batched attention kernels can produce small float-ordering differences on GPU. The chosen tolerance passes with margin; if it ever tightens to failure under a new cuDNN / Flash Attention default, that's a real signal worth investigating and the test will catch it.
+- **Tests as integration tests, not unit-mocked.** Loading the real V-JEPA 2 checkpoint on each test-run costs ~2–3 s (cached); mocking `VJEPA2Model` would hide the real-API bugs this session is specifically trying to catch. Kept the tests real.
+
+**Gate evaluations:**
+- None. Stage 0a gates don't apply until training runs.
+
+**Commits:**
+- `c59b9cf` — fix(deps): bump pins to match working environment with V-JEPA 2 support.
+- `70d69cf` — feat(encoder): frozen V-JEPA 2 wrapper with T=1 video encoding.
+
+**Next immediate action:**
+- Session 3: implement `src/predictor/trajectory_predictor.py` per `SESSION_BATCH_INSTRUCTIONS.md` §Session 3 (4-layer 8-head transformer, W=16, learnable position embeddings and mask token, MSE-appropriate output projection back to 1024-dim), with `tests/test_trajectory_predictor.py` covering the listed shapes and gradient flow.
 
 ### Session 0 — 2026-04-24 — Repo extracted from Eridos parent and re-initialised as Weft
 
@@ -317,7 +355,10 @@ Most recent session first. Append new sessions at the top of this section.
 ### Key commits to be aware of
 - Original Eridos parent bootstrap (audit only): `e91fcad`, `625cbd3`, `edbb662`.
 - Weft initial commit: `1e23b35` — feat(init).
-- Weft "ready for Session 2" commit: (to be filled when this update commits).
+- Weft "ready for Session 2" commit: `0b1c31f`.
+- Merge of GitHub init into Weft: `3460367` — chore(repo): merge GitHub init (LICENSE).
+- Env pin alignment: `c59b9cf` — fix(deps): bump pins to match working environment with V-JEPA 2 support.
+- Session 2 — frozen V-JEPA 2 wrapper: `70d69cf`.
 - End of Stage 0a commit: __________________
 - End of Stage 0b commit: __________________
 - End of Stage 0c commit: __________________
