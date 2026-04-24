@@ -13,10 +13,10 @@ This is the living cross-session handoff. Every session ends by updating this do
 
 ## Current Status
 
-**Current stage:** Session 2 complete. Frozen V-JEPA 2 wrapper implemented and tested (10/10 tests pass). Environment pins bumped to match the WSL stack that actually supports V-JEPA 2 (transformers 5.3.0). Remote `https://github.com/EridosAI/Weft` up-to-date through push earlier in this batch. Proceeding to Session 3 (trajectory predictor).
+**Current stage:** Session 3 complete. Trajectory predictor implemented and tested (10/10 tests pass, 13.67M params, 1.35s test wall-clock). Proceeding to Session 4 (memory bank + online training loop).
 **Last session date:** 2026-04-24
 **Current tier lock:** Tier A only (strictly enforced per pam_tier_a_grok_instructions.md §2 and CODING_STANDARDS.md §1.4).
-**Next immediate action:** Session 3 per SESSION_BATCH_INSTRUCTIONS.md — implement `src/predictor/trajectory_predictor.py` (transformer encoder, 4 layers, 8 heads, hidden 512, MLP 2048, W=16, learnable position + mask tokens) with tests at `tests/test_trajectory_predictor.py`.
+**Next immediate action:** Session 4 per SESSION_BATCH_INSTRUCTIONS.md — implement `src/memory/memory_bank.py` (append-only bank, FAISS IndexFlatIP, L2-normalised, index rebuild every 1000) and `src/training/online_loop.py` (single-pass online loop, W=16 ring buffer, masking schedule with plateau-trigger, AdamW 3e-4 + cosine warmup 5000 steps, stop-gradient assertions, TensorBoard + JSON checkpoint dumps), with tests at `tests/test_memory_bank.py` and `tests/test_online_loop.py`.
 
 ---
 
@@ -93,7 +93,7 @@ Update at the end of each session. Do not skip — this is how the progression t
 | Weft extraction (Session 0) | complete | n/a | this repo | 1e23b35 (initial) |
 | Environment pin alignment | complete | n/a | requirements.txt, .env_snapshot.txt, HANDOFF env section | c59b9cf |
 | Session 2 — frozen V-JEPA 2 wrapper | complete | 10/10 tests pass | src/encoders/frozen_vjepa2.py, tests/test_frozen_vjepa2.py | 70d69cf |
-| Session 3 — trajectory predictor | not started | — | — | — |
+| Session 3 — trajectory predictor | complete | 10/10 tests pass, 13.67M params | src/predictor/trajectory_predictor.py, tests/test_trajectory_predictor.py | 9080f6c |
 | Session 4 — memory bank + training loop | not started | — | — | — |
 | Session 5 — env wrapper + pre-flight smoke test | not started | — | — | — |
 | Stage 0a — single config | not started | — | — | — |
@@ -180,6 +180,40 @@ The instructions §4 treat numerical gate thresholds as calibration targets. Rec
 ## Session Log
 
 Most recent session first. Append new sessions at the top of this section.
+
+### Session 3 — 2026-04-24 — Inward PAM trajectory predictor
+
+**Goal:** Implement `src/predictor/trajectory_predictor.py` — pre-LayerNorm transformer encoder over W=16 context frames + appended query slot, per `SESSION_BATCH_INSTRUCTIONS.md` §Session 3.
+
+**Attempted:**
+- Architecture per the spec: 4 layers, 8 heads, H=512, MLP=2048, GELU, pre-LN. Linear projection D_in=1024 → H=512 on inputs; linear projection H → D_out=1024 followed by a final `nn.LayerNorm(D_out)` on outputs. W+1 learnable position embeddings (trunc-normal std=0.02). Single learnable mask token at H-dim, shared by masked context positions and the query slot at index W.
+- Forward: validate shapes; project context; substitute mask-token at mask_positions via advanced indexing (`projected[batch_idx, mask_positions] = mask_token`) on a `.clone()` of the projected tensor so we don't mutate in-place under autograd; append query token; add position embeddings; transformer; split outputs by index; project + norm.
+- Tests for K=4, K=0 (empty-mask edge case), K=W-1; parameter count logged; output dim round-trip; gradient flow (no parameter ends up with zero grad); mask-token-injection sanity; three shape-validation rejections.
+
+**Worked:**
+- All 10 tests pass in 1.35 s on the WSL stack.
+- Param count: **13,670,912 total = 13,670,912 trainable**. Stop-grad is intentionally NOT applied here — the training loop is responsible for detaching targets.
+- K=0 path returns a zero-sized `(B, 0, D_out)` tensor via `context.new_zeros(...)`, preserving dtype / device.
+- Mask-token-injection test confirms masking a context position changes `predicted_next` (i.e., the mask token is not silently ignored by attention).
+
+**Failed / in progress:**
+- None. Initial test run produced a benign `enable_nested_tensor` warning from PyTorch because pre-LN `TransformerEncoderLayer` is incompatible with the nested-tensor fast path. Silenced by passing `enable_nested_tensor=False` to `nn.TransformerEncoder`. No behavioural change.
+
+**Decisions made:**
+- **Parameter count is 13.67M, outside the spec's "~5–10M" hint.** The arithmetic for the spec'd 4-layer pre-LN transformer at H=512, MLP=2048 plus D=1024 input/output projections lands here (4 × ~3.15M transformer layers + ~524k in-proj + ~525k out-proj + minor). The spec hint appears to have underestimated; I went with the spec's architecture rather than trimming to hit the hint, because the spec is explicit about layer count and dims. Loose assertion `5M ≤ total ≤ 25M` in the test rather than a hard pin — would catch a full refactor but tolerates the factor-of-2 difference against the hint.
+- **Mask token at hidden dim, not input dim.** Spec wording is "single shared vector … projected to hidden dim". Interpreted as: the mask token lives at H=512 (post-projection) so it substitutes the projected-embedding slot cleanly. Alternative (mask token at D=1024 pre-projection) would produce a different set of learnable weights and an extra linear step per mask; chose the simpler and more standard option.
+- **`.clone()` before in-place scatter.** The mask-token injection writes into `projected` at mask positions; doing this in-place without `.clone()` breaks autograd because the pre-masked values are still used by other positions. Cloning has negligible cost at B × W × H scale.
+- **`trunc_normal_(std=0.02)` init** for both the position embeddings and the mask token. Standard ViT-style init; matches the scale of a typical learned parameter at this dim.
+- **Output projection before final LayerNorm** (not after). SESSION_BATCH_INSTRUCTIONS.md says "Final LayerNorm after output projection", which is the order we implemented (output_proj → LayerNorm). A LayerNorm on the projected 1024-dim output is consistent with normalising predictions before they meet MSE targets from the encoder (also 1024-dim embeddings; V-JEPA 2 does not L2-normalise its tokens but has its own LN internally, so this puts the predictor's output onto a comparable scale).
+
+**Gate evaluations:**
+- None. Stage 0a gates apply after training.
+
+**Commits:**
+- `9080f6c` — feat(predictor): trajectory transformer for masked position prediction.
+
+**Next immediate action:**
+- Session 4: implement `src/memory/memory_bank.py` (append-only, FAISS IndexFlatIP on L2-normalised vectors, rebuild every 1000 appends, metadata preserved) and `src/training/online_loop.py` (ring buffer W, masking schedule with plateau trigger, AdamW + cosine warmup 5k steps, **explicit stop-gradient assertions on targets**, TensorBoard logging, JSON checkpoint dumps). Tests per `SESSION_BATCH_INSTRUCTIONS.md` §Session 4.
 
 ### Session 2 — 2026-04-24 — Frozen V-JEPA 2 wrapper
 
@@ -359,6 +393,7 @@ Most recent session first. Append new sessions at the top of this section.
 - Merge of GitHub init into Weft: `3460367` — chore(repo): merge GitHub init (LICENSE).
 - Env pin alignment: `c59b9cf` — fix(deps): bump pins to match working environment with V-JEPA 2 support.
 - Session 2 — frozen V-JEPA 2 wrapper: `70d69cf`.
+- Session 3 — trajectory predictor: `9080f6c`.
 - End of Stage 0a commit: __________________
 - End of Stage 0b commit: __________________
 - End of Stage 0c commit: __________________
