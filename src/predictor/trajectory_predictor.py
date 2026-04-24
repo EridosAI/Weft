@@ -10,8 +10,9 @@ embeddings plus a query position at index W.
     embedding at masked positions. The query position always receives the
     mask token (no embedding to mask — it's the position being predicted).
   - The transformer output at each position of interest (query and masked)
-    is projected back to D_out = D_in via a linear layer followed by a
-    final LayerNorm.
+    is projected back to D_out = D_in via a linear layer. No final
+    output-side LayerNorm — predictions are left unnormalised so the
+    predictor can learn to match encoder target magnitude under MSE.
 
 No stop-gradient is applied here; that is handled in the training loop
 (see src/training/online_loop.py).
@@ -75,7 +76,6 @@ class TrajectoryPredictor(nn.Module):
         )
 
         self.output_proj = nn.Linear(hidden_dim, embed_dim)
-        self.final_norm = nn.LayerNorm(embed_dim)
 
     def forward(
         self,
@@ -132,14 +132,14 @@ class TrajectoryPredictor(nn.Module):
         # Transformer forward: (B, W+1, H)
         encoded = self.encoder(tokens)
 
-        # Query output at position W -> project and norm -> (B, D_out)
+        # Query output at position W -> project back to D_out -> (B, D_out)
         query_out = encoded[:, self.window_size, :]
-        predicted_next = self.final_norm(self.output_proj(query_out))
+        predicted_next = self.output_proj(query_out)
 
         # Masked outputs at mask_positions -> (B, K, D_out)
         if k > 0:
             masked_out = encoded[batch_idx, mask_positions]  # (B, K, H)
-            predicted_masked = self.final_norm(self.output_proj(masked_out))
+            predicted_masked = self.output_proj(masked_out)
         else:
             predicted_masked = context.new_zeros((b, 0, self.embed_dim))
 
