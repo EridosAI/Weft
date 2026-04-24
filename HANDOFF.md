@@ -13,10 +13,10 @@ This is the living cross-session handoff. Every session ends by updating this do
 
 ## Current Status
 
-**Current stage:** **Pre-flight PASS.** Sessions 2–5 of the batch plan are complete. Pre-flight smoke test ran 1000 frames of Stage 0a configuration on CUDA in 63.2 s, with 984 training steps; all 9 pass criteria met. **Do not launch Stage 0a without explicit human instruction.** The spec-correction commit for the CLS-token → mean-pool fix in `pam_tier_a_grok_instructions.md` §3.1 is the final administrative task of this batch and will land as `fix(spec): correct V-JEPA 2 frame embedding extraction to mean-pool (no CLS token in JEPA-family ViTs)`.
+**Current stage:** **Pre-Stage-0a corrections complete. Pre-flight re-run PASSED.** Two code corrections landed (resolution 224→256 to match V-JEPA 2 training regime; final LayerNorm removed from predictor head). Re-smoke at 1000 frames on CUDA in 60.3 s; next-step MSE moved from 0.761 → 0.105, predictor/encoder norm ratio 0.538 → 0.750, all 9 PASS criteria green. Waiting for explicit Stage 0a launch instruction.
 **Last session date:** 2026-04-24
 **Current tier lock:** Tier A only (strictly enforced per pam_tier_a_grok_instructions.md §2 and CODING_STANDARDS.md §1.4).
-**Next immediate action:** Wait for the human's review of the pre-flight result. On explicit instruction, launch Stage 0a per `pam_tier_a_grok_instructions.md` §4.2 (50 000 frames, `configs/stage_0a.yaml`, `nohup` per CODING_STANDARDS.md §5.2).
+**Next immediate action:** Wait for the human's review of the post-fix pre-flight result. On explicit instruction, launch Stage 0a per `pam_tier_a_grok_instructions.md` §4.2 (50 000 frames, `configs/stage_0a.yaml`, `nohup` per CODING_STANDARDS.md §5.2). `main` is 15 commits ahead of `origin/main`; push authorisation still pending from the last one-shot approval.
 
 ---
 
@@ -97,7 +97,8 @@ Update at the end of each session. Do not skip — this is how the progression t
 | Session 4 — memory bank | complete | 11/11 tests pass | src/memory/memory_bank.py, tests/test_memory_bank.py | a1b5de3 |
 | Session 4 — online training loop | complete | 11/11 tests pass | src/training/online_loop.py, tests/test_online_loop.py | 1e9997e |
 | Session 5a — env wrapper + Stage 0a config + pre-flight script | complete | 10/10 env tests pass | src/env/push_t_staged.py, configs/stage_0a.yaml, scripts/preflight_smoke_test.py, tests/test_push_t_staged.py | 7b120cd |
-| Session 5b — pre-flight smoke test execution | **complete — PASS** | 9/9 pass criteria met | results/preflight/{smoke_report.json, SMOKE_REPORT.md} | (this commit) |
+| Session 5b — pre-flight smoke test execution | **complete — PASS** | 9/9 pass criteria met | results/preflight/{smoke_report.json, SMOKE_REPORT.md} | 5ee6bb9 |
+| Pre-Stage-0a corrections — 224→256 + LN removal + re-smoke | **complete — PASS** | 9/9 pass criteria still met; MSE 0.761→0.105 | src/encoders/frozen_vjepa2.py, src/env/push_t_staged.py, src/predictor/trajectory_predictor.py, tests | e3dd5e2, c8a7392, bf50425 |
 | Session 4 — memory bank + training loop | not started | — | — | — |
 | Session 5 — env wrapper + pre-flight smoke test | not started | — | — | — |
 | Stage 0a — single config | not started | — | — | — |
@@ -184,6 +185,48 @@ The instructions §4 treat numerical gate thresholds as calibration targets. Rec
 ## Session Log
 
 Most recent session first. Append new sessions at the top of this section.
+
+### Pre-Stage-0a corrections — 2026-04-24 — Resolution fix + final-LN removal + re-smoke
+
+**Goal:** Apply two code corrections identified by reconciliation / diagnostic analysis, re-run the pre-flight smoke test, record the result. This unblocks Stage 0a authorisation.
+
+**Attempted:**
+- Task 1 — Resolution fix. Grepped `tests/` for 224 and enumerated every match. Updated `src/encoders/frozen_vjepa2.py` (`_EXPECTED_FRAME_SIZE 224→256` and clarified the fpc64-256 naming convention in docstrings), `src/env/push_t_staged.py` (`_ENCODER_FRAME_SIZE 224→256` and docstrings; upscale call site at line 133 already reads from the constant so no logic change), and both test files (`tests/test_frozen_vjepa2.py` random-input shapes + `"expected 256x256"` regex; `tests/test_push_t_staged.py` all frame.shape assertions and `frame_to_encoder_tensor` fixtures). Only coincidental 224 left is the ImageNet green-channel std `0.224` at `src/env/push_t_staged.py:159`.
+- Task 2 — Final-LayerNorm removal. Removed `self.final_norm = nn.LayerNorm(embed_dim)` from `TrajectoryPredictor.__init__` and the two `final_norm(...)` wrapping calls at query-head and masked-head output sites. Updated module docstring to reflect that predictions are unnormalised. Left `norm_first=True` on the internal `TransformerEncoderLayer` alone. Left the absence of a post-stack `nn.TransformerEncoder(..., norm=...)` alone per scope.
+- Task 3 — Re-ran `scripts/preflight_smoke_test.py` at default 1000 frames on CUDA. Result: PASS.
+
+**Worked:**
+- Fast suite (memory + training + predictor + env): 42/42 pass in 4.58 s.
+- Encoder suite at 256×256: 10/10 pass in 6.62 s.
+- Predictor suite after LN removal: 10/10 pass in 1.91 s. Parameter count printed: `total=13,668,864 trainable=13,668,864` (exactly the expected 13,670,912 − 2×1024 = 13,668,864).
+- Full suite after both fixes: 52/52 pass in 8.49 s.
+- Pre-flight re-run: 1000 frames in 60.3 s (prior run was 63.2 s). All 9 PASS criteria still met. Headline deltas vs commit `5ee6bb9`:
+  - Next-step MSE (step 1000): **0.761 → 0.105** — the architectural MSE floor imposed by the final LN is gone; magnitude learning is now active.
+  - Predictor mean norm: **32.0957 → 44.0720** — moved from the LN-pinned ~√1024 toward the encoder's ~59.
+  - Predictor / encoder norm ratio: **0.538 → 0.750** — well above the criterion floor.
+  - Encoder mean norm: 59.6890 → 58.7605 (small shift; the encoder now sees its training-regime 256 input, so the exact values differ but scale is preserved).
+  - Wall-clock: 63.2 s → 60.3 s.
+  - Early-window loss mean (first 50 train steps): 4.531939 → 3.992818.
+  - FAISS top-1 self: 1.000000 both runs.
+
+**Failed / in progress:**
+- None. Every stop condition was checked against the batch instructions and none fired. No FAILURE_REPORT.md was written.
+
+**Decisions made:**
+- **None beyond what was explicitly scoped.** No touching of `configs/stage_0a.yaml`, no post-stack `TransformerEncoder(norm=...)` addition, no adjustment of `norm_first` behaviour, no changes to the pre-flight smoke-test script itself. The "two heads sharing final_norm" observation from reconciliation Task 6 became moot when the LN was removed, as the instructions anticipated.
+
+**Gate evaluations:**
+- None. Stage 0a gate evaluation happens after the 50 000-frame run, not here.
+
+**Commits:**
+- `e3dd5e2` — fix(encoder,env): correct input resolution 224→256 to match V-JEPA 2 training regime.
+- `c8a7392` — refactor(predictor): remove final LayerNorm on output head.
+- `bf50425` — smoke(preflight): re-run after resolution fix and LN removal.
+- (this commit) — docs(handoff): record resolution fix, LN removal, and re-smoke PASS.
+
+**Next immediate action:**
+- Wait for explicit human instruction to launch Stage 0a. No other work.
+- `main` is now **15 commits ahead of `origin/main`**. Push authorisation from the earlier one-shot approval is still in effect for the commits it covered; no new push authorisation has been given for the commits landed after that push.
 
 ### Session 5 — 2026-04-24 — Push-T env wrapper + pre-flight smoke test
 
@@ -480,7 +523,11 @@ Most recent session first. Append new sessions at the top of this section.
 - Session 4 — memory bank: `a1b5de3`.
 - Session 4 — online training loop: `1e9997e`.
 - Session 5a — env wrapper + pre-flight script: `7b120cd`.
-- Session 5b — pre-flight smoke test PASS: (this commit).
+- Session 5b — pre-flight smoke test PASS: `5ee6bb9`.
+- Final spec correction (CLS-token → mean-pool): `ac5a7db`.
+- Pre-Stage-0a resolution fix 224→256: `e3dd5e2`.
+- Pre-Stage-0a final-LN removal: `c8a7392`.
+- Pre-Stage-0a re-smoke PASS: `bf50425`.
 - End of Stage 0a commit: __________________
 - End of Stage 0b commit: __________________
 - End of Stage 0c commit: __________________
