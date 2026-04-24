@@ -13,10 +13,10 @@ This is the living cross-session handoff. Every session ends by updating this do
 
 ## Current Status
 
-**Current stage:** Session 3 complete. Trajectory predictor implemented and tested (10/10 tests pass, 13.67M params, 1.35s test wall-clock). Proceeding to Session 4 (memory bank + online training loop).
+**Current stage:** Session 4 complete. Memory bank and online training loop implemented and tested (22/22 tests pass, 5.2s total). Proceeding to Session 5 (env wrapper + pre-flight smoke test).
 **Last session date:** 2026-04-24
 **Current tier lock:** Tier A only (strictly enforced per pam_tier_a_grok_instructions.md §2 and CODING_STANDARDS.md §1.4).
-**Next immediate action:** Session 4 per SESSION_BATCH_INSTRUCTIONS.md — implement `src/memory/memory_bank.py` (append-only bank, FAISS IndexFlatIP, L2-normalised, index rebuild every 1000) and `src/training/online_loop.py` (single-pass online loop, W=16 ring buffer, masking schedule with plateau-trigger, AdamW 3e-4 + cosine warmup 5000 steps, stop-gradient assertions, TensorBoard + JSON checkpoint dumps), with tests at `tests/test_memory_bank.py` and `tests/test_online_loop.py`.
+**Next immediate action:** Session 5 per SESSION_BATCH_INSTRUCTIONS.md — implement `src/env/push_t_staged.py` (PushTStagedEnv wrapping gym-pusht at 96→224 with random action policy at effective 10 Hz), `configs/stage_0a.yaml`, `scripts/preflight_smoke_test.py`, and `tests/test_push_t_staged.py`. Run the pre-flight smoke test at the end. **Stop at the pre-flight result.**
 
 ---
 
@@ -94,6 +94,9 @@ Update at the end of each session. Do not skip — this is how the progression t
 | Environment pin alignment | complete | n/a | requirements.txt, .env_snapshot.txt, HANDOFF env section | c59b9cf |
 | Session 2 — frozen V-JEPA 2 wrapper | complete | 10/10 tests pass | src/encoders/frozen_vjepa2.py, tests/test_frozen_vjepa2.py | 70d69cf |
 | Session 3 — trajectory predictor | complete | 10/10 tests pass, 13.67M params | src/predictor/trajectory_predictor.py, tests/test_trajectory_predictor.py | 9080f6c |
+| Session 4 — memory bank | complete | 11/11 tests pass | src/memory/memory_bank.py, tests/test_memory_bank.py | a1b5de3 |
+| Session 4 — online training loop | complete | 11/11 tests pass | src/training/online_loop.py, tests/test_online_loop.py | 1e9997e |
+| Session 5 — env wrapper + pre-flight | not started | — | — | — |
 | Session 4 — memory bank + training loop | not started | — | — | — |
 | Session 5 — env wrapper + pre-flight smoke test | not started | — | — | — |
 | Stage 0a — single config | not started | — | — | — |
@@ -180,6 +183,43 @@ The instructions §4 treat numerical gate thresholds as calibration targets. Rec
 ## Session Log
 
 Most recent session first. Append new sessions at the top of this section.
+
+### Session 4 — 2026-04-24 — Memory bank + online training loop
+
+**Goal:** Implement `src/memory/memory_bank.py` (append-only FAISS IndexFlatIP bank on L2-normalised vectors) and `src/training/online_loop.py` (one-step-per-frame online loop with masking schedule, cosine-warmup AdamW, stop-gradient assertions, TensorBoard + JSON snapshots). Per `SESSION_BATCH_INSTRUCTIONS.md` §Session 4.
+
+**Attempted:**
+- `MemoryBank`: pre-allocated float32 numpy store, L2-normalisation on append (rejects zero-norm), automatic FAISS `IndexFlatIP` rebuild every 1000 appends or on demand, growth-doubling on overflow, `get_window` for contiguous slicing, metadata as `FrameMetadata` dataclass preserved through retrieval.
+- `OnlineTrainer` + `PlateauTrigger` + `TrainingConfig`: ring buffer of W most-recent embeddings; at every step push the new frame, and if the ring is full compute loss with the buffer as context and the new frame as next-step target. MSE on both next-step and masked-position targets; AdamW(3e-4) with cosine warmup over first 5000 steps (LambdaLR); TensorBoard + per-checkpoint JSON snapshot.
+- Stop-gradient: three explicit `assert not X.requires_grad` calls at the top of every training step (on context, target_next, target_masked). Comment above them makes the never-remove rule explicit.
+- Tests for both: 11 memory tests + 11 training-loop tests. Tests use `tmp_path` fixtures and disable TensorBoard to keep runs sandboxed. Training-loop tests exercise the real `TrajectoryPredictor` at a tiny size (H=64, 2 layers, MLP=128) for speed; stop-grad failure paths are exercised by deliberately passing grad-requiring inputs.
+
+**Worked:**
+- Memory bank: 11/11 tests pass in 1.58 s. Probe-retrieves-self gives cosine score 1.0 to within 1e-4 for four different targets (FAISS correctness check).
+- Training loop: 11/11 tests pass in 3.62 s. 100-step dry run completes cleanly (100 − W = 84 training steps, all metrics finite). Stop-gradient assertions fire on both construction-time violations. Checkpoint save/load round-trip restores predictor state after a deliberate in-place perturbation. Cosine warmup: LR starts at 0.0 and reaches `base_lr` after `warmup_steps`. Plateau trigger fires on flat history and does not fire on improving history.
+- Combined suite (memory + online + predictor): 32/32 tests pass in 2.94 s.
+
+**Failed / in progress:**
+- None. No long-running jobs.
+
+**Decisions made:**
+- **Stop-gradient is asserted in three places** (context, target_next, target_masked) rather than two as the batch plan lists. The third (target_masked) is also a stop-grad target but was implicit; making it explicit costs nothing and prevents a regression if the masking pipeline is ever restructured.
+- **Masking schedule is exposed via `TrainingConfig.mask_count_cap` per stage** rather than a global constant. Stage 0a cap = 4 (0.25 of W=16); raised in later stages via stage configs.
+- **Plateau trigger compares two consecutive windows, not a single rolling window.** Using `2 × plateau_window` of stored losses and comparing means of the older vs newer half gives a cleaner "did we improve" signal than a single-window derivative estimate.
+- **Growth policy on the backing store: doubling, not fixed increments.** Default max_size=200k is already generous for Stage 0a (50k frames); doubling means a growth event is a one-off O(N) copy rather than repeated small reallocations. Never shrinks.
+- **TensorBoard is optional at construction** (`tensorboard_enabled` flag). Session 4 tests disable it to keep `tmp_path` clean and test wall-clock low; production runs enable it.
+- **Checkpoint snapshot JSON uses aggregate statistics** (min/max/mean/median/std over recent deque of length `checkpoint_interval`), not per-step arrays. Per-step data is available in TensorBoard; the JSON is for quick post-hoc inspection and gate evaluation.
+- **Testing against a tiny `TrajectoryPredictor` instance** (H=64, 2 layers, MLP=128) rather than the spec'd H=512 / 4 layers. The loop's correctness does not depend on predictor size; using the spec config would dominate test wall-clock with no correctness gain. The production Stage 0a run uses the spec config; the pre-flight smoke test in Session 5 is where the full-scale integration happens.
+
+**Gate evaluations:**
+- None. Stage 0a gates apply after training.
+
+**Commits:**
+- `a1b5de3` — feat(memory): append-only memory bank with FAISS IndexFlatIP.
+- `1e9997e` — feat(training): online single-pass training loop with masked trajectory prediction.
+
+**Next immediate action:**
+- Session 5: implement `src/env/push_t_staged.py` (PushTStagedEnv wrapping gym-pusht, 96→224 upscale, uniform random actions held for 4 env steps, frame extraction at effective 10 Hz), `configs/stage_0a.yaml` (all hyperparameters, seed), `scripts/preflight_smoke_test.py` (full-pipeline 1000-frame smoke test), and `tests/test_push_t_staged.py`. Run the pre-flight at the end of Session 5 and **stop at the pre-flight result**.
 
 ### Session 3 — 2026-04-24 — Inward PAM trajectory predictor
 
@@ -394,6 +434,8 @@ Most recent session first. Append new sessions at the top of this section.
 - Env pin alignment: `c59b9cf` — fix(deps): bump pins to match working environment with V-JEPA 2 support.
 - Session 2 — frozen V-JEPA 2 wrapper: `70d69cf`.
 - Session 3 — trajectory predictor: `9080f6c`.
+- Session 4 — memory bank: `a1b5de3`.
+- Session 4 — online training loop: `1e9997e`.
 - End of Stage 0a commit: __________________
 - End of Stage 0b commit: __________________
 - End of Stage 0c commit: __________________
