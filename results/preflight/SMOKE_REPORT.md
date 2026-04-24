@@ -4,7 +4,7 @@
 - Device: `cuda`
 - Frames run: 1000
 - Training steps: 984
-- Wall-clock: 63.2 s
+- Wall-clock: 60.3 s
 - Memory bank entries: 1000
 - FAISS top-1 self score: 1.000000
 - Checkpoint saved: True (/mnt/c/Users/Jason/Desktop/Eridos/Weft/checkpoints/preflight.pt)
@@ -22,15 +22,15 @@
 - `faiss_index_and_retrieve_ok`: **PASS**
 
 ## Loss trajectory (next-step MSE)
-- Early-window mean (first 50 train steps): `4.531939`
-- Late-window mean (last 50 train steps):  `0.760992`
+- Early-window mean (first 50 train steps): `3.992818`
+- Late-window mean (last 50 train steps):  `0.104851`
 - Loss decreased: **True**
 
 ## Gradient norms
-- Median: `8.693811`
+- Median: `6.291672`
 - Finite: **True** ; within `[1e-6, 100]`: **True**
 
 ## Embedding norms
-- Encoder mean: `59.6890`
-- Predictor mean: `32.0957`
-- Ratio (pred / enc): `0.5377` ; within `[0.5, 2.0]`: **True**
+- Encoder mean: `58.7605`
+- Predictor mean: `44.0720`
+- Ratio (pred / enc): `0.7500` ; within `[0.5, 2.0]`: **True**
