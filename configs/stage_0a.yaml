@@ -1,0 +1,56 @@
+# Stage 0a — Single Config, Interpolation Baseline
+# Canonical reference: pam_tier_a_grok_instructions.md §4.2 and §3.4.
+# Gate criteria: STAGE_GATES.md §Stage 0a.
+
+stage: "0a"
+
+# Seed controls the env RNG, masking RNG, and numpy RNG for the run.
+# Changing this changes a Stage 0a run identity; document in HANDOFF if varied.
+seed: 42
+
+# Frames
+total_frames: 50000
+window_size: 16
+
+# Encoder
+encoder:
+  checkpoint: "facebook/vjepa2-vitl-fpc64-256"
+  embed_dim: 1024
+
+# Trajectory predictor (spec'd architecture; see HANDOFF Session 3 decisions)
+predictor:
+  embed_dim: 1024
+  hidden_dim: 512
+  num_layers: 4
+  num_heads: 8
+  mlp_dim: 2048
+  dropout: 0.0
+
+# Memory bank
+memory_bank:
+  max_size: 200000
+  rebuild_interval: 1000
+
+# Optimizer
+optimizer:
+  lr: 0.0003
+  weight_decay: 0.01
+  betas: [0.9, 0.95]
+  warmup_steps: 5000
+
+# Masking schedule (see §3.4)
+masking:
+  initial_mask_count: 1      # ratio = 1 / window_size = 0.0625
+  mask_count_cap: 4          # cap for Stage 0a: 4/16 = 0.25
+  plateau_window: 10000
+  plateau_threshold: 0.05
+
+# Logging / checkpointing
+logging:
+  checkpoint_interval: 10000
+  grad_log_interval: 100
+
+paths:
+  log_dir: "logs"
+  results_dir: "results"
+  checkpoint_dir: "checkpoints"
