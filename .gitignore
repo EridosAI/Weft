@@ -77,3 +77,4 @@ desktop.ini
 # Cache
 .cache/
 .huggingface/
+.pytest_cache/
