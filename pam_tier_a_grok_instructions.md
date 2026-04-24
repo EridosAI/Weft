@@ -75,7 +75,7 @@ If any of the out-of-scope items appear necessary during implementation, stop an
 **Stage 0a: Frozen V-JEPA 2**
 - Load V-JEPA 2 ViT-Large from the reference checkpoint (document the source and version hash in the code).
 - Freeze all parameters.
-- For each input frame (RGB, resized to 224×224): forward through V-JEPA 2, extract the CLS token from the final layer. This is the frame embedding.
+- For each input frame (RGB, resized to 224×224): forward through V-JEPA 2 (wrapping the frame with a T=1 dimension to match the expected `pixel_values_videos` shape of `(B, T, C, H, W)`), take `last_hidden_state` of shape `(B, N_patches, D)`, and **mean-pool over the patch-token dimension** to obtain the `(B, D)` per-frame embedding. V-JEPA 2, like the rest of the JEPA family, is a Vision Transformer **without a CLS token**, so there is no distinguished position to extract; mean-pool of the final-layer patch tokens is the correct extraction and preserves scene content with smooth geometry across adjacent frames.
 - Embedding dimension: 1024 (V-JEPA 2 ViT-L default). Confirm this against the loaded checkpoint.
 - **No fine-tuning, no projection head, no trainable parameters in this module for Stage 0a.**
 - **Potential follow-up (post-Tier A):** once the trajectory predictor mechanism is validated against frozen V-JEPA 2, test whether a SIGReg-trained encoder (introduced in Stage 0b as ablation) outperforms the frozen baseline on cross-boundary recall. If so, SIGReg ViT-Tiny or SIGReg-finetuned V-JEPA 2 becomes a candidate for Tier B adoption.
