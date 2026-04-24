@@ -1,0 +1,26 @@
+# Core dependencies for Weft (Continuous Trajectory PAM Tier A implementation)
+# Pinned versions for reproducibility. Documented in HANDOFF.md
+# Python 3.11+ compatible; tested on Windows with PyTorch 2.6.0+cu124
+torch==2.4.1
+torchvision==0.19.1
+torchaudio==2.4.1
+numpy==1.26.4
+# FAISS - use CPU for bootstrap to avoid CUDA conflicts; switch to faiss-gpu if needed
+faiss-cpu==1.8.0
+gymnasium==0.29.1
+# gym-pusht may refer to a specific Push-T env; using gymnasium-robotics or custom for now
+# Note: actual Push-T implementation may require 'push_t_gym' or custom wrapper - documented
+tensorboard==2.16.2
+PyYAML==6.0.1
+tqdm==4.66.4
+pillow==10.4.0
+opencv-python==4.9.0.80
+scikit-learn==1.5.0
+matplotlib==3.9.0
+pandas==2.2.2
+# For V-JEPA loading (huggingface transformers/timm if checkpoint from HF)
+transformers==4.41.2
+timm==1.0.3
+# Additional utils
+psutil==6.0.0
+# Environment snapshot will capture exact versions post-install

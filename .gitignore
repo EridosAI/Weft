@@ -1,0 +1,79 @@
+# Virtual environments (root-anchored to avoid matching src/env/)
+/.venv/
+/venv/
+/env/
+/ENV/
+
+# Python
+__pycache__/
+*.py[cod]
+*$py.class
+*.so
+.Python
+build/
+develop-eggs/
+dist/
+downloads/
+eggs/
+.eggs/
+lib/
+lib64/
+parts/
+sdist/
+var/
+wheels/
+*.egg-info/
+.installed.cfg
+*.egg
+
+# Checkpoints and results (large files)
+checkpoints/*.pt
+checkpoints/*.pth
+results/*.json
+results/*.pkl
+results/**/*.json
+*.pt
+*.pth
+
+# Logs
+logs/*.log
+logs/*.txt
+*.log
+
+# TensorBoard
+runs/
+tensorboard/
+events.out.tfevents.*
+
+# FAISS indices if large
+*.faiss
+*.index
+
+# OS generated
+.DS_Store
+.DS_Store?
+._*
+.Spotlight-V100
+.Trashes
+ehthumbs.db
+Thumbs.db
+desktop.ini
+
+# IDE
+.vscode/
+.idea/
+*.swp
+*.swo
+
+# Environment snapshots - commit the bootstrap one explicitly
+!.env_snapshot.txt
+# Other env files ignored
+.env
+*.env
+
+# Jupyter
+.ipynb_checkpoints/
+
+# Cache
+.cache/
+.huggingface/
