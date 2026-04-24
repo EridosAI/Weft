@@ -13,10 +13,10 @@ This is the living cross-session handoff. Every session ends by updating this do
 
 ## Current Status
 
-**Current stage:** Bootstrap complete. Repo extracted from Eridos parent and re-initialised as standalone Weft repo. Ready for Execution Order step 2 (frozen V-JEPA 2 encoder impl + smoke test), per SESSION_BATCH_INSTRUCTIONS.md Session 2.
+**Current stage:** Ready for Session 2. Weft repo extraction (Session 0) complete and committed (`1e23b35`). GitHub remote `https://github.com/EridosAI/Weft.git` configured (not pushed; push deferred to explicit instruction). Ready for Execution Order step 2 (frozen V-JEPA 2 encoder impl + smoke test), per SESSION_BATCH_INSTRUCTIONS.md Session 2.
 **Last session date:** 2026-04-24
 **Current tier lock:** Tier A only (strictly enforced per pam_tier_a_grok_instructions.md §2 and CODING_STANDARDS.md §1.4).
-**Next immediate action:** Session 2 per SESSION_BATCH_INSTRUCTIONS.md — implement `src/encoders/frozen_vjepa2.py` wrapping `facebook/vjepa2-vitl-fpc64-256`, with tests under `tests/test_frozen_vjepa2.py`.
+**Next immediate action:** Session 2 per SESSION_BATCH_INSTRUCTIONS.md — implement `src/encoders/frozen_vjepa2.py` wrapping `facebook/vjepa2-vitl-fpc64-256`, with tests under `tests/test_frozen_vjepa2.py`. Do not begin until explicit instruction to proceed.
 
 ---
 
@@ -84,7 +84,7 @@ Update at the end of each session. Do not skip — this is how the progression t
 | Stage | Status | Gates met? | Artifacts (paths) | Commit hash |
 |---|---|---|---|---|
 | Bootstrap (Eridos parent) | complete | n/a | original paths in Eridos repo | e91fcad, 625cbd3, edbb662 (audit) |
-| Weft extraction (Session 0) | complete | n/a | this repo | recorded below once commit lands |
+| Weft extraction (Session 0) | complete | n/a | this repo | 1e23b35 (initial) |
 | Session 2 — frozen V-JEPA 2 wrapper | not started | — | — | — |
 | Session 3 — trajectory predictor | not started | — | — | — |
 | Session 4 — memory bank + training loop | not started | — | — | — |
@@ -208,8 +208,12 @@ Most recent session first. Append new sessions at the top of this section.
 **Gate evaluations:**
 - None (administrative; gates start at Stage 0a).
 
-**Commits (to be filled in after commit lands):**
-- Weft initial commit hash: __________________
+**Commits:**
+- Weft initial commit hash: `1e23b35` — feat(init): Weft repo extracted from Eridos parent, Session 1 bootstrap state preserved in HANDOFF.
+- Weft "ready for Session 2" commit hash: recorded below in "Key commits to be aware of" once the follow-up commit lands.
+
+**Remote:**
+- `origin = https://github.com/EridosAI/Weft.git` added locally. Not pushed — push is a destructive/shared-state action and is deferred to explicit user instruction.
 
 **Next immediate action:**
 - After the human confirms the extraction worked, execute Session 2 per `SESSION_BATCH_INSTRUCTIONS.md` — implement `src/encoders/frozen_vjepa2.py` and its test.
@@ -306,8 +310,8 @@ Most recent session first. Append new sessions at the top of this section.
 
 ### Key commits to be aware of
 - Original Eridos parent bootstrap (audit only): `e91fcad`, `625cbd3`, `edbb662`.
-- Weft initial commit hash: __________________ (to be filled after commit lands).
-- Weft "ready for Session 2" commit hash: __________________ (to be filled).
+- Weft initial commit: `1e23b35` — feat(init).
+- Weft "ready for Session 2" commit: (to be filled when this update commits).
 - End of Stage 0a commit: __________________
 - End of Stage 0b commit: __________________
 - End of Stage 0c commit: __________________
@@ -315,5 +319,13 @@ Most recent session first. Append new sessions at the top of this section.
 
 ---
 
-*Last updated: 2026-04-24 (Session 0 — Weft extraction complete).*
+## Ready for Session 2
+
+Weft repository is clean and ready. Session 0 (extraction from Eridos parent) is complete, committed as `1e23b35`. The Session 1 bootstrap record is preserved in full in this HANDOFF.md, including the authoritative Session 1 decisions (V-JEPA 2 checkpoint `facebook/vjepa2-vitl-fpc64-256`, Python 3.12.3, T=1 pixel_values_videos tensor-shape, τ=5 scaffolding, and the three open decisions all resolved). Working tree is clean; GitHub remote `origin` is configured (not pushed). No training is running, no PIDs to track.
+
+The next action is Session 2 of `SESSION_BATCH_INSTRUCTIONS.md` — implement `src/encoders/frozen_vjepa2.py` wrapping `facebook/vjepa2-vitl-fpc64-256`, with tests under `tests/test_frozen_vjepa2.py`, per the spec requirements in SESSION_BATCH_INSTRUCTIONS.md §Session 2 and `pam_tier_a_grok_instructions.md` §3.1. **Do not begin Session 2 until the human issues an explicit instruction to proceed.**
+
+---
+
+*Last updated: 2026-04-24 (Session 0 — Weft extraction complete; ready for Session 2).*
 *Current session: Pre-Session-2; awaiting explicit instruction to proceed per SESSION_BATCH_INSTRUCTIONS.md.*
