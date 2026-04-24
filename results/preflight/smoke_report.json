@@ -1,0 +1,65 @@
+{
+  "overall": "PASS",
+  "frames_run": 1000,
+  "training_steps": 984,
+  "wall_clock_seconds": 63.189372062683105,
+  "device": "cuda",
+  "memory_bank_size": 1000,
+  "checkpoint_saved": true,
+  "checkpoint_path": "/mnt/c/Users/Jason/Desktop/Eridos/Weft/checkpoints/preflight.pt",
+  "faiss_top1_self_score": 1.0,
+  "loss_next_summary": {
+    "n": 984,
+    "min": 0.6971144676208496,
+    "max": 4.6758036613464355,
+    "mean": 1.8379351671149091,
+    "median": 0.9431925117969513,
+    "std": 1.3883907225605865
+  },
+  "loss_masked_summary": {
+    "n": 984,
+    "min": 0.7067691683769226,
+    "max": 4.654099464416504,
+    "mean": 1.8313053003171595,
+    "median": 0.9162972271442413,
+    "std": 1.3916526569769723
+  },
+  "grad_norm_summary": {
+    "n": 984,
+    "min": 1.50265548651367,
+    "max": 22.52710563522469,
+    "mean": 10.141909138780616,
+    "median": 8.693811291346282,
+    "std": 6.907844600987587
+  },
+  "predicted_norm_summary": {
+    "n": 984,
+    "min": 31.996524810791016,
+    "max": 32.4099235534668,
+    "mean": 32.0956772497999,
+    "median": 32.04017448425293,
+    "std": 0.11873933773731428
+  },
+  "encoder_emb_norm_summary": {
+    "n": 1000,
+    "min": 57.877803802490234,
+    "max": 61.74173355102539,
+    "mean": 59.68901703262329,
+    "median": 59.55817413330078,
+    "std": 0.781935126167364
+  },
+  "loss_early_window_mean": 4.531938629150391,
+  "loss_late_window_mean": 0.760991884469986,
+  "predicted_to_encoder_norm_ratio": 0.5377149573808171,
+  "pass_criteria": {
+    "no_nan_inf": true,
+    "loss_decreased": true,
+    "memory_bank_size_within_5pct": true,
+    "checkpoint_saved": true,
+    "stop_gradient_assertions_ok": true,
+    "grad_norm_median_finite": true,
+    "grad_norm_median_in_range": true,
+    "predicted_norm_within_half_to_two_x": true,
+    "faiss_index_and_retrieve_ok": true
+  }
+}

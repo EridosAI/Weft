@@ -13,10 +13,10 @@ This is the living cross-session handoff. Every session ends by updating this do
 
 ## Current Status
 
-**Current stage:** Session 5a complete (env wrapper + Stage 0a config + pre-flight smoke-test script + env tests, all 10 tests pass; fast suite 42/42). About to run Session 5b: the pre-flight smoke test. Stopping at the pre-flight outcome as directed by the batch plan.
+**Current stage:** **Pre-flight PASS.** Sessions 2–5 of the batch plan are complete. Pre-flight smoke test ran 1000 frames of Stage 0a configuration on CUDA in 63.2 s, with 984 training steps; all 9 pass criteria met. **Do not launch Stage 0a without explicit human instruction.** The spec-correction commit for the CLS-token → mean-pool fix in `pam_tier_a_grok_instructions.md` §3.1 is the final administrative task of this batch and will land as `fix(spec): correct V-JEPA 2 frame embedding extraction to mean-pool (no CLS token in JEPA-family ViTs)`.
 **Last session date:** 2026-04-24
 **Current tier lock:** Tier A only (strictly enforced per pam_tier_a_grok_instructions.md §2 and CODING_STANDARDS.md §1.4).
-**Next immediate action:** Run `scripts/preflight_smoke_test.py` (1000 frames, Stage 0a config, full pipeline on CUDA) and write `results/preflight/{smoke_report.json, SMOKE_REPORT.md}`. On PASS: stop and report to the human; do not launch Stage 0a. On FAIL: also write `FAILURE_REPORT.md`, stop and report.
+**Next immediate action:** Wait for the human's review of the pre-flight result. On explicit instruction, launch Stage 0a per `pam_tier_a_grok_instructions.md` §4.2 (50 000 frames, `configs/stage_0a.yaml`, `nohup` per CODING_STANDARDS.md §5.2).
 
 ---
 
@@ -97,7 +97,7 @@ Update at the end of each session. Do not skip — this is how the progression t
 | Session 4 — memory bank | complete | 11/11 tests pass | src/memory/memory_bank.py, tests/test_memory_bank.py | a1b5de3 |
 | Session 4 — online training loop | complete | 11/11 tests pass | src/training/online_loop.py, tests/test_online_loop.py | 1e9997e |
 | Session 5a — env wrapper + Stage 0a config + pre-flight script | complete | 10/10 env tests pass | src/env/push_t_staged.py, configs/stage_0a.yaml, scripts/preflight_smoke_test.py, tests/test_push_t_staged.py | 7b120cd |
-| Session 5b — pre-flight smoke test execution | not started | — | — | — |
+| Session 5b — pre-flight smoke test execution | **complete — PASS** | 9/9 pass criteria met | results/preflight/{smoke_report.json, SMOKE_REPORT.md} | (this commit) |
 | Session 4 — memory bank + training loop | not started | — | — | — |
 | Session 5 — env wrapper + pre-flight smoke test | not started | — | — | — |
 | Stage 0a — single config | not started | — | — | — |
@@ -184,6 +184,48 @@ The instructions §4 treat numerical gate thresholds as calibration targets. Rec
 ## Session Log
 
 Most recent session first. Append new sessions at the top of this section.
+
+### Session 5 — 2026-04-24 — Push-T env wrapper + pre-flight smoke test
+
+**Goal:** Finalise the pipeline boundary (env wrapper + Stage 0a config + pre-flight smoke-test script) and run the end-to-end smoke test. Per `SESSION_BATCH_INSTRUCTIONS.md` §Session 5.
+
+**Attempted:**
+- Session 5a: `src/env/push_t_staged.py` (PushTStagedEnv with 96→224 nearest-neighbour upscale, 4-step action hold → 10 Hz effective frame rate, auto-reset across episode boundaries); `configs/stage_0a.yaml` (full hyperparameter bundle incl. seed=42, total_frames=50000, W=16, predictor spec arch, memory max_size=200k rebuild_interval=1000, AdamW+cosine-warmup, masking schedule, checkpoint/log intervals); `scripts/preflight_smoke_test.py` (full-pipeline 1000-frame run, 9 pass criteria evaluated, writes smoke_report.json + SMOKE_REPORT.md, also FAILURE_REPORT.md on failure); `tests/test_push_t_staged.py` (10 tests covering shape/dtype/4-step subsampling/auto-reset/determinism/stage!="0a" rejection).
+- Encountered a dependency surprise en route to running the env: `gym-pusht==0.1.6` still uses the pre-7.x pymunk `Space.add_collision_handler` API, which pymunk 7.2.0 removed. Pinned `pymunk==6.11.1` in `requirements.txt` and regenerated `.env_snapshot.txt`; no silent fixes. Folded into the Session 5a commit.
+- Session 5b: ran `scripts/preflight_smoke_test.py` on CUDA (RTX 4080 SUPER via WSL2 passthrough) at the default 1000 frames. Wall-clock 63.2 s. 984 training steps. Every pass criterion PASSED.
+
+**Worked:**
+- Env tests: 10/10 pass in 2.04 s. Fast test suite (memory + training + predictor + env = 42 tests) passes in 3.73 s.
+- Pre-flight: 1000/1000 frames, 984 training steps, 63.2 s wall-clock. `SMOKE_REPORT.md` summary (all PASS):
+  - `no_nan_inf`: PASS
+  - `loss_decreased`: PASS — next-step MSE dropped from 4.53 (first 50 train steps) to 0.76 (last 50).
+  - `memory_bank_size_within_5pct`: PASS — bank has 1000 entries, target 1000.
+  - `checkpoint_saved`: PASS — `checkpoints/preflight.pt` written at step 250 (~164 MB).
+  - `stop_gradient_assertions_ok`: PASS — none fired.
+  - `grad_norm_median_finite` & `_in_range`: PASS — median = 8.69, well inside `[1e-6, 100]`.
+  - `predicted_norm_within_half_to_two_x`: PASS — predicted mean norm 32.1, encoder mean norm 59.7, ratio 0.538 (just above the 0.5 floor; flagged for watch).
+  - `faiss_index_and_retrieve_ok`: PASS — probe retrieves itself with cosine 1.000000.
+
+**Failed / in progress:**
+- None. Pre-flight PASS; stopping per batch instructions.
+
+**Decisions made:**
+- **`pymunk==6.11.1` pin** — required to keep `gym-pusht==0.1.6` working; documented inline in `requirements.txt` with the specific API reason. Consider switching to a newer gym-pusht (or forking) if one lands that supports pymunk 7.x; not required for the batch.
+- **Nearest-neighbour upscale 96→224**, not bilinear. Push-T is rendered with sharp edges; bilinear would blur the T-block and the background/goal rectangle, which would be a silent change to the input distribution the encoder sees. Nearest preserves the edge structure.
+- **Auto-reset across episode boundaries inside `next_frame()`**. The encoder and memory bank do not care about episode boundaries; the training signal cares about a continuous frame stream. Explicit auto-reset avoids the caller needing episode-aware bookkeeping.
+- **Pre-flight checkpoint interval set to 500** (overriding Stage 0a's 10k) so the 1000-frame run produces at least one checkpoint-snapshot JSON to exercise the save path. Production Stage 0a runs will use the config's 10 000-step cadence.
+- **Pre-flight whitelist exception in `.gitignore`**: per-stage `results/**/*.json` remains ignored, but `!results/preflight/*.json` is whitelisted because the pre-flight report is a single, small, audit-critical artifact. CODING_STANDARDS.md §2.4 forbids committing "`results/*.json` beyond a small sample" — the pre-flight is the sample.
+- **Predicted-to-encoder norm ratio 0.538** — within the criterion `[0.5, 2.0]` but just barely. Root cause: the final LayerNorm on the predictor output rescales embeddings to roughly unit variance (norm ~√1024 ≈ 32), while V-JEPA 2's post-transformer embeddings are not norm-constrained and sit around 60 in this run. This is geometry-consistent rather than a collapse signal, but it does mean MSE targets against raw encoder embeddings operate at a different scale than predictions. **Flagged for Stage 0a gate evaluation**: if later curves show `loss_next` plateauing far from zero, the LN + norm-mismatch is a plausible cause and should be investigated before adding capacity.
+
+**Gate evaluations:**
+- None. Stage 0a gate evaluation happens after the 50 000-frame run, not here.
+
+**Commits:**
+- `7b120cd` — feat(env): Push-T staged environment wrapper, Stage 0a config. (Bundled env + config + preflight script + env tests + pymunk pin in one commit; SESSION_BATCH_INSTRUCTIONS.md nominally proposed two commit messages for this session but a single logical batch landed cleanly and the body of the commit enumerates both.)
+- (this commit) — test(preflight): end-to-end smoke test for full pipeline, result: PASS.
+
+**Next immediate action:**
+- Final administrative task: spec correction commit to `pam_tier_a_grok_instructions.md` §3.1 replacing "CLS token from the final layer" with "mean-pool over patch tokens". Message: `fix(spec): correct V-JEPA 2 frame embedding extraction to mean-pool (no CLS token in JEPA-family ViTs)`. After that commit, the batch ends and the human decides whether to launch Stage 0a.
 
 ### Session 4 — 2026-04-24 — Memory bank + online training loop
 
@@ -438,6 +480,7 @@ Most recent session first. Append new sessions at the top of this section.
 - Session 4 — memory bank: `a1b5de3`.
 - Session 4 — online training loop: `1e9997e`.
 - Session 5a — env wrapper + pre-flight script: `7b120cd`.
+- Session 5b — pre-flight smoke test PASS: (this commit).
 - End of Stage 0a commit: __________________
 - End of Stage 0b commit: __________________
 - End of Stage 0c commit: __________________

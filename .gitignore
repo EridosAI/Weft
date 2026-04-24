@@ -32,6 +32,8 @@ checkpoints/*.pth
 results/*.json
 results/*.pkl
 results/**/*.json
+# Preserve one-shot pre-flight report JSONs (they are small and audit-critical).
+!results/preflight/*.json
 *.pt
 *.pth
 
