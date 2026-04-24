@@ -13,10 +13,10 @@ This is the living cross-session handoff. Every session ends by updating this do
 
 ## Current Status
 
-**Current stage:** **Pre-Stage-0a corrections complete. Pre-flight re-run PASSED.** Two code corrections landed (resolution 224→256 to match V-JEPA 2 training regime; final LayerNorm removed from predictor head). Re-smoke at 1000 frames on CUDA in 60.3 s; next-step MSE moved from 0.761 → 0.105, predictor/encoder norm ratio 0.538 → 0.750, all 9 PASS criteria green. Waiting for explicit Stage 0a launch instruction.
-**Last session date:** 2026-04-24
+**Current stage:** **Stage 0a driver implemented and tested. Ready for launch.** `scripts/run_stage_0a.py` lands as the 50,000-frame orchestration loop that Sessions 2–5 did not produce. All 57 tests pass (52 prior + 5 new); real `--dry-run` against V-JEPA 2 + gym-pusht on CUDA completes in 2.0 s with 26 frames / 10 training steps. Awaiting explicit launch instruction.
+**Last session date:** 2026-04-25
 **Current tier lock:** Tier A only (strictly enforced per pam_tier_a_grok_instructions.md §2 and CODING_STANDARDS.md §1.4).
-**Next immediate action:** Wait for the human's review of the post-fix pre-flight result. On explicit instruction, launch Stage 0a per `pam_tier_a_grok_instructions.md` §4.2 (50 000 frames, `configs/stage_0a.yaml`, `nohup` per CODING_STANDARDS.md §5.2). `main` is 15 commits ahead of `origin/main`; push authorisation still pending from the last one-shot approval.
+**Next immediate action:** Wait for the human's review of the driver implementation and a separate explicit launch instruction. On launch: `nohup python3 -u scripts/run_stage_0a.py > logs/stage_0a_$(date +%Y%m%d_%H%M%S).log 2>&1 &` per CODING_STANDARDS.md §5.2. The driver monitors itself via launch_info.txt + progress_log.txt + per-checkpoint JSONs and handles SIGTERM cleanly. Push authorisation for the prior batch stands only for commits it covered; post-driver commits need a fresh authorisation.
 
 ---
 
@@ -99,6 +99,7 @@ Update at the end of each session. Do not skip — this is how the progression t
 | Session 5a — env wrapper + Stage 0a config + pre-flight script | complete | 10/10 env tests pass | src/env/push_t_staged.py, configs/stage_0a.yaml, scripts/preflight_smoke_test.py, tests/test_push_t_staged.py | 7b120cd |
 | Session 5b — pre-flight smoke test execution | **complete — PASS** | 9/9 pass criteria met | results/preflight/{smoke_report.json, SMOKE_REPORT.md} | 5ee6bb9 |
 | Pre-Stage-0a corrections — 224→256 + LN removal + re-smoke | **complete — PASS** | 9/9 pass criteria still met; MSE 0.761→0.105 | src/encoders/frozen_vjepa2.py, src/env/push_t_staged.py, src/predictor/trajectory_predictor.py, tests | e3dd5e2, c8a7392, bf50425 |
+| Stage 0a driver implementation | **complete** | 5/5 new tests pass; 57/57 suite; real --dry-run 2.0 s | scripts/run_stage_0a.py, tests/test_run_stage_0a.py | 55e50e5 |
 | Session 4 — memory bank + training loop | not started | — | — | — |
 | Session 5 — env wrapper + pre-flight smoke test | not started | — | — | — |
 | Stage 0a — single config | not started | — | — | — |
@@ -185,6 +186,43 @@ The instructions §4 treat numerical gate thresholds as calibration targets. Rec
 ## Session Log
 
 Most recent session first. Append new sessions at the top of this section.
+
+### Stage 0a driver implementation — 2026-04-25 — scripts/run_stage_0a.py
+
+**Goal:** Implement the Stage 0a training driver that the Session 2–5 batch did not produce. Discovered at the prior launch attempt: `scripts/run_stage_0a.py` was missing (only `scripts/preflight_smoke_test.py` existed, and that runs 1000 frames to `results/preflight/`, not 50,000 frames to `results/stage_0a/`). This task fills the gap.
+
+**Attempted:**
+- §0 read-first audit of `src/env/push_t_staged.py`, `src/encoders/frozen_vjepa2.py`, `src/predictor/trajectory_predictor.py`, `src/memory/memory_bank.py`, `src/training/online_loop.py`, and `scripts/preflight_smoke_test.py` to understand which components the driver delegates to vs. reimplements.
+- Implemented `scripts/run_stage_0a.py` (~440 lines) with: config loading + required-key validation + stage check, component builders (encoder / env / predictor / memory bank / trainer), factory injection points for tests, pre-loop invariant assertions (frozen encoder, predictor param count = 13,668,864, empty bank + empty ring buffer), per-frame loop (encode → memory-bank append with `episode_boundary_flag` → `trainer.observe_frame`), NaN/Inf guard on every training step's stats, per-checkpoint `.pt` saves tagged with short git commit, progress_log.txt append at each checkpoint boundary, SIGTERM/SIGINT deferred shutdown, clean-exit `training_complete.json` / sigterm-tagged `training_sigterm.json`, fatal-exit `FATAL_ERROR.md` with traceback.
+- Implemented `tests/test_run_stage_0a.py` — 5 tests, all pass in 4.73 s: dry-run end-to-end (fake factories, bank populated to W+10, predictor params moved, no checkpoint, no final JSON), episode-boundary flag population (monkey-patched inner env `reset` on a duck-typed fake staged env with `terminate_every=15` produces frame-0 = True, mid-run boundaries = True, non-boundary frames = False, all bool), SIGTERM exit path (fake encoder trips the module shutdown flag on its 20th call; assertion on sigterm-tagged .pt + `training_sigterm.json`; no `training_complete.json`), real-config integrity (all fields with expected values + missing-key + wrong-stage rejection), `--resume` CLI flag returns exit code 2 with message.
+- Full suite: 57/57 pass in 8.20 s (52 prior + 5 new).
+- Real `--dry-run` against V-JEPA 2 + gym-pusht on CUDA: 2.0 s for 26 frames / 10 training steps. Predictor trainable param count asserted at 13,668,864.
+
+**Worked:**
+- All tests green. Real dry-run green. Driver is ready for launch invocation.
+- `launch_info.txt` written with UTC timestamp, PID, device, dry-run flag, full git commit, config path, and config sha256[:12] — enough to reproduce run identity from the artifact.
+
+**Failed / in progress:**
+- None. No long-running jobs.
+
+**Decisions made:**
+- **Episode-boundary detection via driver-local monkey-patch of `env._env.reset`**, not via an env-wrapper API change. `PushTStagedEnv.next_frame` internalises auto-reset and does NOT surface a signal; modifying `src/env/push_t_staged.py` is out of scope per the driver instruction's §11. `_ResetTracker` replaces the underlying gym env's `reset` bound method with a closure that sets a one-shot flag, then restores the original on `close()`. The flag is read once per `next_frame()` call and written to `FrameMetadata.extra["episode_boundary_flag"]`. This preserves `src/env/push_t_staged.py` as the single source of truth for env behaviour while still producing the metadata required for post-hoc analysis at reset frames.
+- **SIGTERM/SIGINT signal handler only sets a flag.** All cleanup (final checkpoint, final JSON, log flush) runs in the main loop, not inside the handler — avoids re-entrancy issues and guarantees the current training step completes before shutdown. Signal number is recorded in the final JSON's `signal` field.
+- **Resume-from-checkpoint deferred.** `OnlineTrainer.save_checkpoint` persists predictor / optimizer / scheduler / counters, but NOT env RNG, the trainer's mask-sampler `_rng` state, or the ring buffer contents. Bit-exact resume is impossible with the current format. The `--resume` CLI flag is accepted but errors out with a clear message and exit code 2. Extending the checkpoint format is a separate scoped task.
+- **Dry-run semantics: W + 10 frames (26 total).** Instruction said "run 10 steps"; I read that as 10 training steps, which requires W=16 frames of warmup + 10 training frames. This exercises the observe_frame training path and makes the "predictor state changed" assertion meaningful.
+- **Factory injection, not dependency injection via globals.** `run(..., encoder_factory=None, env_factory=None, predictor_factory=None, expected_predictor_params=...)` keeps the production path clean (factories default to `None` → real builders) while letting tests substitute fakes without mocking `sys.modules`. Simpler to read and harder to drift.
+- **All checkpoints tagged with short git commit hash** per CODING_STANDARDS.md §5.4. Format: `stage_0a_step<step>[_sigterm]_<7char>.pt`.
+- **Driver is purely orchestration — zero reimplementation of training-step logic.** `OnlineTrainer.observe_frame(emb)` owns every invariant the training step must preserve (stop-gradient asserts, mask sampling, loss, backward, AdamW, scheduler, plateau-driven mask advancement, TensorBoard scalar logging, per-`checkpoint_interval` JSON snapshot dumps to `results/stage_0a/checkpoint_<step>.json`). The driver's only training concerns are frame production (via env), encoding, bank metadata, NaN/Inf guard, `.pt` checkpointing, launch/progress artifacts, and shutdown.
+
+**Gate evaluations:**
+- None. Stage 0a gate evaluation happens after the 50,000-frame run, not here.
+
+**Commits:**
+- `55e50e5` — feat(training): Stage 0a driver — 50k-frame orchestration loop.
+- (this commit) — docs(handoff): Stage 0a driver implementation complete.
+
+**Next immediate action:**
+- Wait for explicit human instruction to launch Stage 0a. Launch pattern per `CODING_STANDARDS.md §5.2`: `nohup python3 -u scripts/run_stage_0a.py > logs/stage_0a_$(date +%Y%m%d_%H%M%S).log 2>&1 &; echo $! > logs/stage_0a.pid`. Note `python3`, not `python` — WSL env has no `python` symlink. No push authorisation for the driver commits yet.
 
 ### Pre-Stage-0a corrections — 2026-04-24 — Resolution fix + final-LN removal + re-smoke
 
@@ -528,6 +566,7 @@ Most recent session first. Append new sessions at the top of this section.
 - Pre-Stage-0a resolution fix 224→256: `e3dd5e2`.
 - Pre-Stage-0a final-LN removal: `c8a7392`.
 - Pre-Stage-0a re-smoke PASS: `bf50425`.
+- Stage 0a driver implementation: `55e50e5` — feat(training): Stage 0a driver — 50k-frame orchestration loop.
 - End of Stage 0a commit: __________________
 - End of Stage 0b commit: __________________
 - End of Stage 0c commit: __________________
