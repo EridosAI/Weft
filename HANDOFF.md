@@ -24,15 +24,19 @@ This is the living cross-session handoff. Every session ends by updating this do
 
 Populated during Session 1 bootstrap (2026-04-23) inside the original Eridos parent repo. Preserved verbatim in this re-initialised Weft repo; audit trail to original commits in the Session 0 log entry below.
 
-### Environment verification
-- [x] Operating system and version confirmed: Windows 11 (10.0.26200-SP0) — documented divergence from spec §0 (Ubuntu 24.04); away-mode decision, local RTX 4080 setup used.
-- [x] Python version: 3.12.3 — documented divergence from spec §0 (3.11); rationale in Decisions section.
-- [x] PyTorch version + CUDA version: 2.6.0+cu124 (CUDA 12.4 compatible) — recorded in `.env_snapshot.txt`.
-- [x] GPU detected (name + VRAM): NVIDIA GeForce RTX 4080 SUPER, 15.99 GB — verified via `torch.cuda.get_device_properties(0)`.
-- [x] `torch.cuda.is_available()` returns True.
-- [x] Working directory exists and is git-tracked (then: Eridos subdir; now: standalone Weft repo per Session 0 extraction).
-- [x] `.venv/` created at project root via `python -m venv .venv --prompt "pam"`.
-- [partial] `.venv/` activated before any pip installs — partial; global conda env used for Session 1 to avoid torch reinstall overhead on Windows. Full venv activation planned before any training run.
+### Environment verification — **canonical dev environment is WSL2** (updated 2026-04-24, Session 2 prep)
+
+The Session 1 bootstrap was initially characterised on the Windows side. Before Session 2 began, V-JEPA 2 support was discovered to require `transformers>=5.x`, which drove an alignment step: the canonical development environment is now the WSL2 stack where torch and CUDA are both known-working and V-JEPA 2 loads. The Windows `.venv/` is a deferred cleanup task (see Open Decisions & Questions) and must be brought into line before any Windows-native run.
+
+- [x] Operating system: WSL2 on Windows 11 host (Linux 6.6.87.2-microsoft-standard-WSL2). Divergence from spec §0 (Ubuntu 24.04) documented; WSL2 kernel is functionally equivalent for this stack.
+- [x] Python version: 3.12.3 (system Python under WSL2; user site-packages). Divergence from spec §0 (3.11) documented.
+- [x] PyTorch version + CUDA version: **2.10.0+cu128** (CUDA 12.8 via WSL2 GPU passthrough). Newer than spec (2.4 / cu124); verified functionally equivalent for the spec's needs.
+- [x] GPU detected: NVIDIA GeForce RTX 4080 SUPER, 15.99 GB (host side; WSL2 passthrough confirmed via `torch.cuda.is_available() == True`).
+- [x] `torch.cuda.is_available()` returns True under WSL2.
+- [x] `transformers==5.3.0` ships `VJEPA2Model`, `VJEPA2Config`, `VJEPA2VideoProcessor` (verified by import probe). This is the load path for `facebook/vjepa2-vitl-fpc64-256`.
+- [x] `faiss-cpu==1.13.2` available. `gymnasium==1.3.0`, `gym-pusht==0.1.6` available.
+- [x] Working directory is the standalone Weft repo at `C:\Users\Jason\Desktop\Eridos\Weft\` (WSL path `/mnt/c/Users/Jason/Desktop/Eridos/Weft/`).
+- [deferred] Windows `.venv/` at project root: exists but was built against Python 3.13 per Session 1 bootstrap; needs a rebuild + `pip install -r requirements.txt` against the Windows Python 3.12 / CUDA 12.x stack before any Windows-native run. Recorded in Open Decisions & Questions.
 
 ### Repository initialisation (Weft-relative, post-extraction)
 - [x] `git init` run at Weft project root (fresh init; original Eridos parent commits referenced in Session 0 log).
@@ -41,9 +45,11 @@ Populated during Session 1 bootstrap (2026-04-23) inside the original Eridos par
 - [x] First Weft commit hash: recorded in "Key commits to be aware of" below after commit lands.
 
 ### Dependency pinning
-- [x] `requirements.txt` pinned: `torch==2.4.1`, `torchvision`, `numpy==1.26.4`, `faiss-cpu==1.8.0`, gymnasium (for gym-pusht path), `tensorboard`, `PyYAML`, `timm`/`transformers` for V-JEPA.
-- [partial] `pip install -r requirements.txt` — global conda env used in Session 1; full venv install deferred to pre-Stage-0a.
-- [x] `pip freeze > .env_snapshot.txt` captured and committed.
+- [x] `requirements.txt` pinned to the **actual working WSL stack** (Session 2 prep, 2026-04-24): `torch==2.10.0`, `torchvision==0.25.0`, `numpy==2.4.2`, `faiss-cpu==1.13.2`, `gymnasium==1.3.0`, `gym-pusht==0.1.6`, `transformers==5.3.0`, `tensorboard==2.20.0`, `PyYAML==6.0.1`, `tqdm==4.67.3`, `scikit-learn==1.8.0`, `matplotlib==3.10.8`, `pandas==2.3.3`, `pillow==12.1.1`, `opencv-python==4.13.0`, `pytest==9.0.3`.
+- [x] All listed packages import cleanly in the WSL Python 3.12.3 environment.
+- [x] `pip freeze > .env_snapshot.txt` regenerated in the WSL environment (full user-site snapshot; primary source of truth is `requirements.txt`).
+- [note] `timm` removed from Session-1 list: not required for V-JEPA 2 loading through `transformers.VJEPA2Model`.
+- [note] `torchaudio` removed: not used anywhere in the Tier A pipeline.
 
 ### Smoke tests before any training
 - [deferred] V-JEPA 2 checkpoint identified: **`facebook/vjepa2-vitl-fpc64-256`** (Meta V-JEPA 2 ViT-L/16, 64-frame / 256-patch). Load + smoke test deferred to Session 2 per Execution Order.
@@ -118,7 +124,7 @@ PID | Started | Script | Log file | Expected completion | Notes
 
 Items flagged for human review. Accumulate here; do not clear them without explicit instruction.
 
-(None open. Session 1's three open decisions are recorded as resolved in the Session 1 Decisions section above.)
+- **Windows `.venv/` rebuild (deferred cleanup).** Session 1 created a Windows `.venv/` skeleton assuming Python 3.13; the canonical environment is now WSL2 Python 3.12.3 per the Session 2 prep alignment. Before any Windows-native run is performed (e.g., if we ever move training off WSL2), the Windows `.venv/` must be deleted and rebuilt against a Python 3.12 interpreter, then `pip install -r requirements.txt` run inside it. Not blocking for Session 2–5 or for Stage 0a under WSL2.
 
 ---
 
