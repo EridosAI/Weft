@@ -10,7 +10,8 @@ Frame protocol:
   - Random actions are sampled uniformly and held for 4 env steps; the
     saved frame is the one at the end of the 4-step hold.
   - Effective experience frame rate: 10 Hz (every 4th env step).
-  - Output frames are upscaled to 224×224 RGB uint8 for V-JEPA 2 input.
+  - Output frames are upscaled to 256×256 RGB uint8 for V-JEPA 2 input
+    (V-JEPA 2 ViT-L/fpc64 was pretrained at 256×256 spatial resolution).
 """
 
 from __future__ import annotations
@@ -23,7 +24,7 @@ import numpy as np
 
 
 _UNDERLYING_RENDER_SIZE = 96
-_ENCODER_FRAME_SIZE = 224
+_ENCODER_FRAME_SIZE = 256
 _ACTION_HOLD_ENV_STEPS = 4
 
 
@@ -34,7 +35,7 @@ class PushTStagedEnv:
         env = PushTStagedEnv(stage="0a", seed=42)
         env.reset()
         for _ in range(1000):
-            frame = env.next_frame()   # (224, 224, 3) uint8 in [0, 255]
+            frame = env.next_frame()   # (256, 256, 3) uint8 in [0, 255]
 
     Design notes:
       - `reset()` is called by `next_frame()` implicitly if the env has not
@@ -146,8 +147,8 @@ def _nearest_upscale(frame: np.ndarray, target: int) -> np.ndarray:
 
 
 def frame_to_encoder_tensor(frame: np.ndarray) -> "torch.Tensor":
-    """Convert a `(224, 224, 3)` uint8 frame to an ImageNet-normalised
-    `(3, 224, 224)` float32 tensor on CPU. Separate helper so tests can
+    """Convert a `(256, 256, 3)` uint8 frame to an ImageNet-normalised
+    `(3, 256, 256)` float32 tensor on CPU. Separate helper so tests can
     exercise the env wrapper without a torch import at module level."""
     import torch
 

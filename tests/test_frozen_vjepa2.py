@@ -16,7 +16,7 @@ def encoder() -> FrozenVJepa2Encoder:
 
 
 def _random_frame(batch: int | None, device: torch.device) -> torch.Tensor:
-    shape = (3, 224, 224) if batch is None else (batch, 3, 224, 224)
+    shape = (3, 256, 256) if batch is None else (batch, 3, 256, 256)
     return torch.randn(*shape, device=device)
 
 
@@ -67,14 +67,14 @@ def test_single_vs_batched_equivalence(encoder: FrozenVJepa2Encoder) -> None:
 
 
 def test_rejects_wrong_channel_count(encoder: FrozenVJepa2Encoder) -> None:
-    bad = torch.randn(1, 4, 224, 224, device=encoder.device)
+    bad = torch.randn(1, 4, 256, 256, device=encoder.device)
     with pytest.raises(ValueError, match="expected 3 channels"):
         encoder.encode_frame(bad)
 
 
 def test_rejects_wrong_spatial_size(encoder: FrozenVJepa2Encoder) -> None:
     bad = torch.randn(1, 3, 96, 96, device=encoder.device)
-    with pytest.raises(ValueError, match="expected 224x224"):
+    with pytest.raises(ValueError, match="expected 256x256"):
         encoder.encode_frame(bad)
 
 

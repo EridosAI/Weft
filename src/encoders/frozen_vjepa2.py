@@ -5,8 +5,10 @@ produced by mean-pooling patch tokens from the final layer. This preserves
 scene content with smooth geometry across adjacent frames, suitable for
 trajectory prediction targets.
 
-Checkpoint: `facebook/vjepa2-vitl-fpc64-256` (ViT-L/16, 64-frame / 256-patch).
-Frame embedding dim: D = 1024 (verified at load time against config.hidden_size).
+Checkpoint: `facebook/vjepa2-vitl-fpc64-256` (ViT-L/16, 64-frame clip,
+256×256 spatial input — the "256" in the checkpoint name is the pretraining
+spatial resolution, not a patch count). Frame embedding dim: D = 1024
+(verified at load time against config.hidden_size).
 
 All parameters are frozen. All forward passes run under `torch.no_grad()`.
 """
@@ -22,7 +24,7 @@ from transformers import VJEPA2Model
 
 _DEFAULT_CHECKPOINT = "facebook/vjepa2-vitl-fpc64-256"
 _EXPECTED_EMBED_DIM = 1024
-_EXPECTED_FRAME_SIZE = 224
+_EXPECTED_FRAME_SIZE = 256
 
 
 class FrozenVJepa2Encoder(nn.Module):
@@ -35,7 +37,7 @@ class FrozenVJepa2Encoder(nn.Module):
 
     Input contract:
         - Pixel tensor of shape (C, H, W) or (B, C, H, W).
-        - H == W == 224. C == 3 (RGB).
+        - H == W == 256. C == 3 (RGB).
         - Expected to be already preprocessed (ImageNet normalisation as used
           by VJEPA2VideoProcessor). This module does NOT preprocess; callers
           pass normalised float tensors.

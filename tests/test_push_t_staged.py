@@ -13,7 +13,7 @@ def test_env_reset_produces_upscaled_frame() -> None:
     env = PushTStagedEnv(stage="0a", seed=42)
     try:
         frame = env.reset()
-        assert frame.shape == (224, 224, 3)
+        assert frame.shape == (256, 256, 3)
         assert frame.dtype == np.uint8
         assert int(frame.min()) >= 0 and int(frame.max()) <= 255
     finally:
@@ -55,7 +55,7 @@ def test_frame_output_shape_and_dtype() -> None:
     try:
         env.reset()
         frame = env.next_frame()
-        assert frame.shape == (224, 224, 3)
+        assert frame.shape == (256, 256, 3)
         assert frame.dtype == np.uint8
         assert frame.min() >= 0
         assert frame.max() <= 255
@@ -68,7 +68,7 @@ def test_next_frame_auto_resets_before_first_call() -> None:
     env = PushTStagedEnv(stage="0a", seed=42)
     try:
         frame = env.next_frame()
-        assert frame.shape == (224, 224, 3)
+        assert frame.shape == (256, 256, 3)
         assert frame.dtype == np.uint8
     finally:
         env.close()
@@ -93,10 +93,10 @@ def test_action_held_for_4_env_steps() -> None:
 
 
 def test_frame_to_encoder_tensor_contract() -> None:
-    frame = (np.random.default_rng(0).integers(0, 256, size=(224, 224, 3))).astype(np.uint8)
+    frame = (np.random.default_rng(0).integers(0, 256, size=(256, 256, 3))).astype(np.uint8)
     t = frame_to_encoder_tensor(frame)
     assert isinstance(t, torch.Tensor)
-    assert t.shape == (3, 224, 224)
+    assert t.shape == (3, 256, 256)
     assert t.dtype == torch.float32
     # Values after ImageNet normalisation sit roughly in [-2.1, 2.6].
     assert float(t.min()) >= -3.0
@@ -104,7 +104,7 @@ def test_frame_to_encoder_tensor_contract() -> None:
 
 
 def test_frame_to_encoder_tensor_rejects_non_uint8() -> None:
-    frame = np.zeros((224, 224, 3), dtype=np.float32)
+    frame = np.zeros((256, 256, 3), dtype=np.float32)
     with pytest.raises(TypeError, match="uint8"):
         frame_to_encoder_tensor(frame)
 
